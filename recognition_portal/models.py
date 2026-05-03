@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class Employee(Base):
@@ -20,12 +24,14 @@ class Employee(Base):
     region: Mapped[Optional[str]] = mapped_column(String(64))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     manager_id: Mapped[Optional[int]] = mapped_column(ForeignKey("employees.id"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utc_now
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=_utc_now,
+        onupdate=_utc_now,
     )
 
     manager: Mapped[Optional["Employee"]] = relationship(
@@ -50,20 +56,24 @@ class LoginToken(Base):
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     requested_by_ip: Mapped[Optional[str]] = mapped_column(String(64))
-    consumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    consumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utc_now
+    )
 
 
 class NotificationEvent(Base):
     __tablename__ = "notification_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    recipient_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    recipient_email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     subject: Mapped[str] = mapped_column(String(255), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utc_now
+    )
 
 
 class Recognition(Base):
@@ -77,8 +87,12 @@ class Recognition(Base):
     company_value: Mapped[Optional[str]] = mapped_column(String(64))
     message: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="published")
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-    published_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utc_now
+    )
+    published_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utc_now
+    )
 
     sender: Mapped["Employee"] = relationship("Employee", foreign_keys=[sender_id])
     recipient: Mapped["Employee"] = relationship("Employee", foreign_keys=[recipient_id])
@@ -92,7 +106,9 @@ class RecognitionModerationAction(Base):
     actor_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), nullable=False)
     action_type: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utc_now
+    )
 
     recognition: Mapped["Recognition"] = relationship("Recognition")
     actor: Mapped["Employee"] = relationship("Employee")
@@ -108,12 +124,14 @@ class PointsRecognitionRequest(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     requested_points_per_recipient: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending_approval")
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utc_now
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=_utc_now,
+        onupdate=_utc_now,
     )
 
     sender: Mapped["Employee"] = relationship("Employee", foreign_keys=[sender_id])

@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -53,7 +53,7 @@ class DuplicateRecognitionGuardrailTests(unittest.TestCase):
             }
 
     def _age_non_monetary_recognition(self, recognition_id: int, *, days_old: int) -> None:
-        aged_at = datetime.utcnow() - timedelta(days=days_old)
+        aged_at = datetime.now(timezone.utc) - timedelta(days=days_old)
         with self.app.app_context():
             with session_scope(self.app) as session:
                 recognition = session.get(Recognition, recognition_id)
@@ -61,7 +61,7 @@ class DuplicateRecognitionGuardrailTests(unittest.TestCase):
                 recognition.published_at = aged_at
 
     def _age_points_request(self, request_id: int, *, days_old: int) -> None:
-        aged_at = datetime.utcnow() - timedelta(days=days_old)
+        aged_at = datetime.now(timezone.utc) - timedelta(days=days_old)
         with self.app.app_context():
             with session_scope(self.app) as session:
                 request_record = session.get(PointsRecognitionRequest, request_id)

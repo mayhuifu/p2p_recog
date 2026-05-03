@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
+import os
 from typing import Dict, List
 
 from flask import Flask
-from sqlalchemy.orm import Session
 
 from .db import session_scope
 from .models import NotificationEvent
+
+
+_logger = logging.getLogger("recognition_portal.notifications")
 
 
 def init_notifications(app: Flask) -> None:
@@ -22,7 +26,14 @@ def send_email(app: Flask, event_type: str, recipient_email: str, subject: str, 
     }
     _store_event(app, payload)
     app.extensions["notification_outbox"].append(payload)
-    print(f"[EMAIL] To: {recipient_email}\nSubject: {subject}\n\n{body}\n")
+    if _email_logging_enabled():
+        _logger.info(
+            "email event_type=%s recipient=%s subject=%s",
+            event_type,
+            recipient_email,
+            subject,
+        )
+        _logger.debug("email body event_type=%s body=%r", event_type, body)
 
 
 def _store_event(app: Flask, payload: Dict[str, str]) -> None:
@@ -39,3 +50,7 @@ def _store_event(app: Flask, payload: Dict[str, str]) -> None:
 
 def delivered_messages(app: Flask) -> List[Dict[str, str]]:
     return list(app.extensions["notification_outbox"])
+
+
+def _email_logging_enabled() -> bool:
+    return os.getenv("LOG_EMAIL_EVENTS", "true").strip().lower() not in {"0", "false", "no"}

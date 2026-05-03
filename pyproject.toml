@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "error::DeprecationWarning:recognition_portal.*",
+    "ignore::DeprecationWarning",
+]

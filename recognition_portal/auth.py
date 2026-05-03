@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import time
+from collections import defaultdict, deque
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
-from typing import Callable, Optional
+from threading import Lock
+from typing import Callable, Deque, Dict, Optional
 
 from flask import Flask, flash, g, redirect, request, session, url_for
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from .employee_directory import list_employees
 from .models import Employee, LoginToken
 from .notifications import send_email
 
@@ -33,7 +35,57 @@ class SessionUser:
         return self.access_state == "active"
 
 
+class LoginRateLimitError(ValueError):
+    pass
+
+
+class _LoginRateLimiter:
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._email_hits: Dict[str, Deque[float]] = defaultdict(deque)
+        self._ip_hits: Dict[str, Deque[float]] = defaultdict(deque)
+
+    def check(
+        self,
+        *,
+        email: str,
+        ip: Optional[str],
+        per_email: int,
+        per_ip: int,
+        window_seconds: int,
+    ) -> None:
+        now = time.monotonic()
+        cutoff = now - window_seconds
+        with self._lock:
+            email_hits = self._trim(self._email_hits[email], cutoff)
+            if len(email_hits) >= per_email:
+                raise LoginRateLimitError(
+                    "Too many sign-in requests for that email. Wait a few minutes and try again."
+                )
+            if ip:
+                ip_hits = self._trim(self._ip_hits[ip], cutoff)
+                if len(ip_hits) >= per_ip:
+                    raise LoginRateLimitError(
+                        "Too many sign-in requests from this device. Wait a few minutes and try again."
+                    )
+                ip_hits.append(now)
+            email_hits.append(now)
+
+    @staticmethod
+    def _trim(hits: Deque[float], cutoff: float) -> Deque[float]:
+        while hits and hits[0] < cutoff:
+            hits.popleft()
+        return hits
+
+    def clear(self) -> None:
+        with self._lock:
+            self._email_hits.clear()
+            self._ip_hits.clear()
+
+
 def register_auth(app: Flask) -> None:
+    app.extensions["login_rate_limiter"] = _LoginRateLimiter()
+
     @app.before_request
     def load_user() -> None:
         data = session.get("user_session")
@@ -47,13 +99,15 @@ def register_auth(app: Flask) -> None:
 def create_magic_link_request(app: Flask, db_session: Session, email: str, requested_by_ip: Optional[str]) -> LoginToken:
     normalized_email = normalize_email(email)
     ensure_company_domain(app, normalized_email)
+    _enforce_login_rate_limit(app, email=normalized_email, ip=requested_by_ip)
+    _purge_stale_tokens(db_session)
 
     token = secrets.token_urlsafe(24)
     login_token = LoginToken(
         email=normalized_email,
         token_hash=hash_token(token),
         requested_by_ip=requested_by_ip,
-        expires_at=datetime.utcnow() + timedelta(minutes=app.config["MAGIC_LINK_TTL_MINUTES"]),
+        expires_at=_utc_now() + timedelta(minutes=app.config["MAGIC_LINK_TTL_MINUTES"]),
     )
     db_session.add(login_token)
     db_session.flush()
@@ -75,12 +129,12 @@ def consume_magic_link(db_session: Session, raw_token: str) -> LoginToken:
         raise ValueError("That sign-in link is not valid.")
     if token.status != "pending":
         raise ValueError("That sign-in link has already been used.")
-    if token.expires_at < datetime.utcnow():
+    if _ensure_aware(token.expires_at) < _utc_now():
         token.status = "expired"
         raise ValueError("That sign-in link has expired. Request a new one.")
 
     token.status = "consumed"
-    token.consumed_at = datetime.utcnow()
+    token.consumed_at = _utc_now()
     return token
 
 
@@ -169,4 +223,30 @@ def build_magic_link_email(app: Flask, raw_token: str) -> str:
         "Use this sign-in link to access the P2P Recognition portal.\n\n"
         f"{login_url}\n\n"
         f"This link expires in {app.config['MAGIC_LINK_TTL_MINUTES']} minutes."
+    )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _ensure_aware(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def _enforce_login_rate_limit(app: Flask, *, email: str, ip: Optional[str]) -> None:
+    limiter: _LoginRateLimiter = app.extensions["login_rate_limiter"]
+    limiter.check(
+        email=email,
+        ip=ip,
+        per_email=app.config["LOGIN_RATE_LIMIT_PER_EMAIL"],
+        per_ip=app.config["LOGIN_RATE_LIMIT_PER_IP"],
+        window_seconds=app.config["LOGIN_RATE_LIMIT_WINDOW_SECONDS"],
+    )
+
+
+def _purge_stale_tokens(db_session: Session) -> None:
+    cutoff = _utc_now() - timedelta(days=7)
+    db_session.execute(
+        delete(LoginToken).where(LoginToken.expires_at < cutoff)
     )

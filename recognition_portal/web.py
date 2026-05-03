@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
-from sqlalchemy import select
 
 from .auth import (
     active_employee_required,
@@ -12,7 +13,13 @@ from .auth import (
     role_required,
 )
 from .db import session_scope
-from .employee_directory import DirectoryImportError, get_employee, import_employees_from_csv, list_employees, list_managers
+from .employee_directory import (
+    DirectoryImportError,
+    get_employee,
+    import_employees_from_csv,
+    list_employees,
+    list_managers,
+)
 from .models import Employee
 from .recognitions import (
     COMPANY_VALUES,
@@ -46,13 +53,17 @@ ROLE_OPTIONS = [
 ]
 
 
+_EMPTY_NON_MONETARY_FORM = {"recipient_id": "", "category": "", "company_value": "", "message": ""}
+_EMPTY_POINTS_FORM = {"recipient_ids": [], "category": "", "company_value": "", "message": "", "points": ""}
+
+
 def register_routes(app: Flask) -> None:
     @app.get("/")
     def index():
         if getattr(g, "current_user", None) is not None:
             return redirect(url_for("portal_home"))
-        with session_scope(app) as session:
-            employees = list_employees(session)
+        with session_scope(app) as db_session:
+            employees = list_employees(db_session)
             active_count = sum(1 for employee in employees if employee.is_active)
             manager_count = sum(1 for employee in employees if employee.role == "manager")
             region_count = len({employee.region for employee in employees if employee.region})
@@ -118,18 +129,9 @@ def register_routes(app: Flask) -> None:
     @login_required
     def portal_home():
         user = g.current_user
-        context = _build_portal_context(app, user)
-        return render_template(
-            "portal_home.html",
-            user=user,
-            **context,
-            recognition_categories=RECOGNITION_CATEGORIES,
-            company_values=COMPANY_VALUES,
-            points_preset_options=POINTS_PRESET_OPTIONS,
-            non_monetary_form_data={"recipient_id": "", "category": "", "company_value": "", "message": ""},
-            points_form_data={"recipient_ids": [], "category": "", "company_value": "", "message": "", "points": ""},
-            can_moderate_recognition=can_moderate_recognition,
-        )
+        with session_scope(app) as db_session:
+            context = _build_portal_context(db_session, user)
+            return _render_portal(user, context)
 
     @app.post("/recognitions/non-monetary")
     @active_employee_required
@@ -141,6 +143,18 @@ def register_routes(app: Flask) -> None:
             "company_value": request.form.get("company_value", "").strip(),
             "message": request.form.get("message", ""),
         }
+        try:
+            recipient_id = _coerce_int(
+                form_data["recipient_id"],
+                "Select a valid employee recipient.",
+                error_cls=RecognitionValidationError,
+            )
+        except RecognitionValidationError as exc:
+            flash(str(exc), "danger")
+            with session_scope(app) as db_session:
+                context = _build_portal_context(db_session, user)
+                return _render_portal(user, context, non_monetary_form_data=form_data)
+
         with session_scope(app) as db_session:
             try:
                 create_non_monetary_recognition(
@@ -148,7 +162,7 @@ def register_routes(app: Flask) -> None:
                     db_session,
                     RecognitionCreateInput(
                         sender_id=user.employee_id,
-                        recipient_id=int(form_data["recipient_id"]),
+                        recipient_id=recipient_id,
                         category=form_data["category"],
                         company_value=form_data["company_value"] or None,
                         message=form_data["message"],
@@ -156,21 +170,10 @@ def register_routes(app: Flask) -> None:
                 )
                 flash("Recognition published to the company feed.", "success")
                 return redirect(url_for("portal_home"))
-            except (ValueError, RecognitionValidationError) as exc:
+            except RecognitionValidationError as exc:
                 flash(str(exc), "danger")
-
-        context = _build_portal_context(app, user)
-        return render_template(
-            "portal_home.html",
-            user=user,
-            **context,
-            recognition_categories=RECOGNITION_CATEGORIES,
-            company_values=COMPANY_VALUES,
-            points_preset_options=POINTS_PRESET_OPTIONS,
-            non_monetary_form_data=form_data,
-            points_form_data={"recipient_ids": [], "category": "", "company_value": "", "message": "", "points": ""},
-            can_moderate_recognition=can_moderate_recognition,
-        )
+                context = _build_portal_context(db_session, user)
+                return _render_portal(user, context, non_monetary_form_data=form_data)
 
     @app.post("/recognitions/points")
     @active_employee_required
@@ -184,55 +187,92 @@ def register_routes(app: Flask) -> None:
             "points": request.form.get("points", "").strip(),
         }
         try:
+            recipient_ids = _coerce_int_list(
+                form_data["recipient_ids"], "Select valid employee recipients."
+            )
+            points = _coerce_int(form_data["points"], "Choose a valid points amount.")
+        except PointsRecognitionError as exc:
+            flash(str(exc), "danger")
             with session_scope(app) as db_session:
+                context = _build_portal_context(db_session, user)
+                return _render_portal(user, context, points_form_data=form_data)
+
+        with session_scope(app) as db_session:
+            try:
                 create_points_recognition_request(
                     db_session,
                     PointsRecognitionInput(
                         sender_id=user.employee_id,
-                        recipient_ids=[int(recipient_id) for recipient_id in form_data["recipient_ids"]],
+                        recipient_ids=recipient_ids,
                         category=form_data["category"],
                         company_value=form_data["company_value"] or None,
                         message=form_data["message"],
-                        points=_coerce_points_value(form_data["points"]),
+                        points=points,
                     ),
                 )
-            flash("Points recognition submitted for manager approval.", "success")
-            return redirect(url_for("portal_home"))
-        except (ValueError, PointsRecognitionError) as exc:
-            flash(str(exc), "danger")
-
-        context = _build_portal_context(app, user)
-        return render_template(
-            "portal_home.html",
-            user=user,
-            **context,
-            recognition_categories=RECOGNITION_CATEGORIES,
-            company_values=COMPANY_VALUES,
-            points_preset_options=POINTS_PRESET_OPTIONS,
-            non_monetary_form_data={"recipient_id": "", "category": "", "company_value": "", "message": ""},
-            points_form_data=form_data,
-            can_moderate_recognition=can_moderate_recognition,
-        )
+                flash("Points recognition submitted for manager approval.", "success")
+                return redirect(url_for("portal_home"))
+            except PointsRecognitionError as exc:
+                flash(str(exc), "danger")
+                context = _build_portal_context(db_session, user)
+                return _render_portal(user, context, points_form_data=form_data)
 
     @app.route("/recognitions/points/<int:request_id>/edit", methods=["GET", "POST"])
     @active_employee_required
     def edit_points_recognition(request_id: int):
         user = g.current_user
-        try:
-            with session_scope(app) as db_session:
+        with session_scope(app) as db_session:
+            try:
                 request_record = get_points_recognition_request_for_sender(
                     db_session,
                     request_id=request_id,
                     sender_id=user.employee_id,
                 )
-                if request_record.status != "pending_approval":
-                    flash("Only pending points recognitions can be edited.", "danger")
+            except PointsRecognitionError as exc:
+                flash(str(exc), "danger")
+                return redirect(url_for("portal_home"))
+
+            if request_record.status != "pending_approval":
+                flash("Only pending points recognitions can be edited.", "danger")
+                return redirect(url_for("portal_home"))
+
+            employees = [
+                candidate
+                for candidate in list_employees(db_session)
+                if candidate.id != user.employee_id and candidate.can_participate
+            ]
+
+            if request.method == "POST":
+                form_data = {
+                    "recipient_ids": request.form.getlist("recipient_ids"),
+                    "category": request.form.get("category", "").strip(),
+                    "company_value": request.form.get("company_value", "").strip(),
+                    "message": request.form.get("message", ""),
+                    "points": request.form.get("points", "").strip(),
+                }
+                try:
+                    recipient_ids = _coerce_int_list(
+                        form_data["recipient_ids"], "Select valid employee recipients."
+                    )
+                    points = _coerce_int(form_data["points"], "Choose a valid points amount.")
+                    request_record = update_points_recognition_request(
+                        db_session,
+                        request_id=request_id,
+                        sender_id=user.employee_id,
+                        payload=PointsRecognitionInput(
+                            sender_id=user.employee_id,
+                            recipient_ids=recipient_ids,
+                            category=form_data["category"],
+                            company_value=form_data["company_value"] or None,
+                            message=form_data["message"],
+                            points=points,
+                        ),
+                    )
+                    flash("Pending points recognition updated.", "success")
                     return redirect(url_for("portal_home"))
-                employees = [
-                    candidate
-                    for candidate in list_employees(db_session)
-                    if candidate.id != user.employee_id and candidate.can_participate
-                ]
+                except PointsRecognitionError as exc:
+                    flash(str(exc), "danger")
+            else:
                 form_data = {
                     "recipient_ids": [str(recipient.recipient_id) for recipient in request_record.recipients],
                     "category": request_record.category,
@@ -240,46 +280,17 @@ def register_routes(app: Flask) -> None:
                     "message": request_record.message,
                     "points": str(request_record.requested_points_per_recipient),
                 }
-                if request.method == "POST":
-                    form_data = {
-                        "recipient_ids": request.form.getlist("recipient_ids"),
-                        "category": request.form.get("category", "").strip(),
-                        "company_value": request.form.get("company_value", "").strip(),
-                        "message": request.form.get("message", ""),
-                        "points": request.form.get("points", "").strip(),
-                    }
-                    try:
-                        request_record = update_points_recognition_request(
-                            db_session,
-                            request_id=request_id,
-                            sender_id=user.employee_id,
-                            payload=PointsRecognitionInput(
-                                sender_id=user.employee_id,
-                                recipient_ids=[int(recipient_id) for recipient_id in form_data["recipient_ids"]],
-                                category=form_data["category"],
-                                company_value=form_data["company_value"] or None,
-                                message=form_data["message"],
-                                points=_coerce_points_value(form_data["points"]),
-                            ),
-                        )
-                        flash("Pending points recognition updated.", "success")
-                        return redirect(url_for("portal_home"))
-                    except (ValueError, PointsRecognitionError) as exc:
-                        flash(str(exc), "danger")
-        except PointsRecognitionError as exc:
-            flash(str(exc), "danger")
-            return redirect(url_for("portal_home"))
 
-        return render_template(
-            "edit_points_recognition.html",
-            user=user,
-            request_record=request_record,
-            employees=employees,
-            recognition_categories=RECOGNITION_CATEGORIES,
-            company_values=COMPANY_VALUES,
-            points_preset_options=POINTS_PRESET_OPTIONS,
-            form_data=form_data,
-        )
+            return render_template(
+                "edit_points_recognition.html",
+                user=user,
+                request_record=request_record,
+                employees=employees,
+                recognition_categories=RECOGNITION_CATEGORIES,
+                company_values=COMPANY_VALUES,
+                points_preset_options=POINTS_PRESET_OPTIONS,
+                form_data=form_data,
+            )
 
     @app.post("/recognitions/points/<int:request_id>/cancel")
     @active_employee_required
@@ -337,19 +348,30 @@ def register_routes(app: Flask) -> None:
     @app.get("/admin/employees")
     @role_required("admin")
     def admin_employees():
-        with session_scope(app) as session:
-            employees = list_employees(session)
+        with session_scope(app) as db_session:
+            employees = list_employees(db_session)
         return render_template("admin_employees.html", employees=employees)
 
     @app.route("/admin/employees/new", methods=["GET", "POST"])
     @role_required("admin")
     def new_employee():
-        with session_scope(app) as session:
+        with session_scope(app) as db_session:
             employee = Employee(name="", email="", role="employee", is_active=True)
-            managers = list_managers(session)
+            managers = list_managers(db_session)
             if request.method == "POST":
-                _apply_employee_form(employee, request.form, managers)
-                session.add(employee)
+                try:
+                    _apply_employee_form(employee, request.form, managers)
+                except ValueError as exc:
+                    flash(str(exc), "danger")
+                    return render_template(
+                        "employee_form.html",
+                        employee=employee,
+                        managers=managers,
+                        role_options=ROLE_OPTIONS,
+                        page_title="Create employee",
+                        submit_label="Create employee",
+                    )
+                db_session.add(employee)
                 flash(f"Created employee record for {employee.name}.", "success")
                 return redirect(url_for("admin_employees"))
 
@@ -365,15 +387,26 @@ def register_routes(app: Flask) -> None:
     @app.route("/admin/employees/<int:employee_id>/edit", methods=["GET", "POST"])
     @role_required("admin")
     def edit_employee(employee_id: int):
-        with session_scope(app) as session:
-            employee = get_employee(session, employee_id)
+        with session_scope(app) as db_session:
+            employee = get_employee(db_session, employee_id)
             if employee is None:
                 flash("Employee not found.", "danger")
                 return redirect(url_for("admin_employees"))
 
-            managers = [manager for manager in list_managers(session) if manager.id != employee.id]
+            managers = [manager for manager in list_managers(db_session) if manager.id != employee.id]
             if request.method == "POST":
-                _apply_employee_form(employee, request.form, managers)
+                try:
+                    _apply_employee_form(employee, request.form, managers)
+                except ValueError as exc:
+                    flash(str(exc), "danger")
+                    return render_template(
+                        "employee_form.html",
+                        employee=employee,
+                        managers=managers,
+                        role_options=ROLE_OPTIONS,
+                        page_title=f"Edit {employee.name}",
+                        submit_label="Save changes",
+                    )
                 flash(f"Updated employee record for {employee.name}.", "success")
                 return redirect(url_for("admin_employees"))
 
@@ -404,8 +437,8 @@ def register_routes(app: Flask) -> None:
                 draft_csv = upload.stream.read().decode("utf-8")
 
             try:
-                with session_scope(app) as session:
-                    result = import_employees_from_csv(session, draft_csv)
+                with session_scope(app) as db_session:
+                    result = import_employees_from_csv(db_session, draft_csv)
                 flash(
                     f"Imported {result.total_rows} rows: {result.created} created, {result.updated} updated.",
                     "success",
@@ -421,9 +454,36 @@ def register_routes(app: Flask) -> None:
         )
 
 
+def _render_portal(
+    user,
+    context: dict,
+    *,
+    non_monetary_form_data: Optional[dict] = None,
+    points_form_data: Optional[dict] = None,
+):
+    return render_template(
+        "portal_home.html",
+        user=user,
+        **context,
+        recognition_categories=RECOGNITION_CATEGORIES,
+        company_values=COMPANY_VALUES,
+        points_preset_options=POINTS_PRESET_OPTIONS,
+        non_monetary_form_data=non_monetary_form_data or dict(_EMPTY_NON_MONETARY_FORM),
+        points_form_data=points_form_data or {**_EMPTY_POINTS_FORM, "recipient_ids": []},
+        can_moderate_recognition=can_moderate_recognition,
+    )
+
+
 def _apply_employee_form(employee: Employee, form, managers: list[Employee]) -> None:
-    employee.name = form.get("name", "").strip()
-    employee.email = form.get("email", "").strip().lower()
+    name = form.get("name", "").strip()
+    email = form.get("email", "").strip().lower()
+    if not name:
+        raise ValueError("Employee name is required.")
+    if not email or "@" not in email:
+        raise ValueError("A valid employee email is required.")
+
+    employee.name = name
+    employee.email = email
     employee.role = form.get("role", "employee").strip() or "employee"
     employee.department = form.get("department", "").strip() or None
     employee.region = form.get("region", "").strip() or None
@@ -434,31 +494,30 @@ def _apply_employee_form(employee: Employee, form, managers: list[Employee]) -> 
     employee.manager = manager_lookup.get(manager_id)
 
 
-def _build_portal_context(app: Flask, user) -> dict:
+def _build_portal_context(db_session, user) -> dict:
     employee = None
-    employees = []
+    employees: list[Employee] = []
     feed = []
     sent = []
     received = []
     moderation_queue = []
     points_requests = []
     if user.employee_id is not None:
-        with session_scope(app) as db_session:
-            employee = db_session.get(Employee, user.employee_id)
-            if user.access_state == "active":
-                employees = [
-                    candidate
-                    for candidate in list_employees(db_session)
-                    if candidate.id != user.employee_id and candidate.can_participate
-                ]
-                feed = list_feed_recognitions(db_session)
-                sent, received = list_employee_recognitions(db_session, user.employee_id)
-                points_requests = list_points_recognition_requests_for_sender(
-                    db_session,
-                    sender_id=user.employee_id,
-                )
-                if user.role == "admin":
-                    moderation_queue = list_all_recognitions_for_admin(db_session)
+        employee = db_session.get(Employee, user.employee_id)
+        if user.access_state == "active":
+            employees = [
+                candidate
+                for candidate in list_employees(db_session)
+                if candidate.id != user.employee_id and candidate.can_participate
+            ]
+            feed = list_feed_recognitions(db_session)
+            sent, received = list_employee_recognitions(db_session, user.employee_id)
+            points_requests = list_points_recognition_requests_for_sender(
+                db_session,
+                sender_id=user.employee_id,
+            )
+            if user.role == "admin":
+                moderation_queue = list_all_recognitions_for_admin(db_session)
     return {
         "employee": employee,
         "employees": employees,
@@ -470,8 +529,24 @@ def _build_portal_context(app: Flask, user) -> dict:
     }
 
 
-def _coerce_points_value(raw_value: str) -> int:
-    value = raw_value.strip()
+def _coerce_int(raw_value: str, error_message: str, error_cls: type[ValueError] = PointsRecognitionError) -> int:
+    value = (raw_value or "").strip()
     if not value:
-        raise PointsRecognitionError("Choose a valid points amount.")
-    return int(value)
+        raise error_cls(error_message)
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise error_cls(error_message) from exc
+
+
+def _coerce_int_list(raw_values: list[str], error_message: str, error_cls: type[ValueError] = PointsRecognitionError) -> list[int]:
+    coerced: list[int] = []
+    for raw in raw_values:
+        value = (raw or "").strip()
+        if not value:
+            raise error_cls(error_message)
+        try:
+            coerced.append(int(value))
+        except ValueError as exc:
+            raise error_cls(error_message) from exc
+    return coerced
