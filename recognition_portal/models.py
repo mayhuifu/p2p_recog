@@ -64,3 +64,21 @@ class NotificationEvent(Base):
     subject: Mapped[str] = mapped_column(String(255), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class Recognition(Base):
+    __tablename__ = "recognitions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), nullable=False, index=True)
+    recipient_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), nullable=False, index=True)
+    recognition_type: Mapped[str] = mapped_column(String(32), nullable=False, default="non_monetary")
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    company_value: Mapped[Optional[str]] = mapped_column(String(64))
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="published")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    published_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    sender: Mapped["Employee"] = relationship("Employee", foreign_keys=[sender_id])
+    recipient: Mapped["Employee"] = relationship("Employee", foreign_keys=[recipient_id])

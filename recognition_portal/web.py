@@ -14,6 +14,15 @@ from .auth import (
 from .db import session_scope
 from .employee_directory import DirectoryImportError, get_employee, import_employees_from_csv, list_employees, list_managers
 from .models import Employee
+from .recognitions import (
+    COMPANY_VALUES,
+    RECOGNITION_CATEGORIES,
+    RecognitionCreateInput,
+    RecognitionValidationError,
+    create_non_monetary_recognition,
+    list_employee_recognitions,
+    list_feed_recognitions,
+)
 
 
 ROLE_OPTIONS = [
@@ -97,10 +106,82 @@ def register_routes(app: Flask) -> None:
     def portal_home():
         user = g.current_user
         employee = None
+        employees = []
+        feed = []
+        sent = []
+        received = []
         if user.employee_id is not None:
             with session_scope(app) as db_session:
                 employee = db_session.get(Employee, user.employee_id)
-        return render_template("portal_home.html", user=user, employee=employee)
+                if user.access_state == "active":
+                    employees = [
+                        candidate
+                        for candidate in list_employees(db_session)
+                        if candidate.id != user.employee_id and candidate.can_participate
+                    ]
+                    feed = list_feed_recognitions(db_session)
+                    sent, received = list_employee_recognitions(db_session, user.employee_id)
+        return render_template(
+            "portal_home.html",
+            user=user,
+            employee=employee,
+            employees=employees,
+            feed=feed,
+            sent=sent,
+            received=received,
+            recognition_categories=RECOGNITION_CATEGORIES,
+            company_values=COMPANY_VALUES,
+            form_data={"recipient_id": "", "category": "", "company_value": "", "message": ""},
+        )
+
+    @app.post("/recognitions/non-monetary")
+    @active_employee_required
+    def submit_non_monetary_recognition():
+        user = g.current_user
+        form_data = {
+            "recipient_id": request.form.get("recipient_id", "").strip(),
+            "category": request.form.get("category", "").strip(),
+            "company_value": request.form.get("company_value", "").strip(),
+            "message": request.form.get("message", ""),
+        }
+        with session_scope(app) as db_session:
+            employee = db_session.get(Employee, user.employee_id)
+            employees = [
+                candidate
+                for candidate in list_employees(db_session)
+                if candidate.id != user.employee_id and candidate.can_participate
+            ]
+            feed = list_feed_recognitions(db_session)
+            sent, received = list_employee_recognitions(db_session, user.employee_id)
+            try:
+                create_non_monetary_recognition(
+                    app,
+                    db_session,
+                    RecognitionCreateInput(
+                        sender_id=user.employee_id,
+                        recipient_id=int(form_data["recipient_id"]),
+                        category=form_data["category"],
+                        company_value=form_data["company_value"] or None,
+                        message=form_data["message"],
+                    ),
+                )
+                flash("Recognition published to the company feed.", "success")
+                return redirect(url_for("portal_home"))
+            except (ValueError, RecognitionValidationError) as exc:
+                flash(str(exc), "danger")
+
+        return render_template(
+            "portal_home.html",
+            user=user,
+            employee=employee,
+            employees=employees,
+            feed=feed,
+            sent=sent,
+            received=received,
+            recognition_categories=RECOGNITION_CATEGORIES,
+            company_values=COMPANY_VALUES,
+            form_data=form_data,
+        )
 
     @app.get("/admin/employees")
     @role_required("admin")

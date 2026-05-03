@@ -58,7 +58,7 @@ class MagicLinkAuthTests(unittest.TestCase):
 
         response = self.client.get(f"/login/consume?token={token}", follow_redirects=True)
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Access granted", response.data)
+        self.assertIn(b"Recognize a coworker", response.data)
         self.assertIn(b"admin", response.data)
 
         response = self.client.get("/admin/employees")
