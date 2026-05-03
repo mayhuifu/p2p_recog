@@ -7,4 +7,3 @@ instance/*.db
 
 .env
 .env.*
-crewai/p2precog/setenv.src
