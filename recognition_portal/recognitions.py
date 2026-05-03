@@ -34,6 +34,7 @@ COMPANY_VALUES = [
 ]
 
 POINTS_PRESET_OPTIONS = [10, 25, 50]
+DUPLICATE_RECOGNITION_COOLDOWN_DAYS = 14
 
 
 class RecognitionValidationError(ValueError):
@@ -93,16 +94,11 @@ def create_non_monetary_recognition(app, db_session: Session, payload: Recogniti
     if len(message) > 500:
         raise RecognitionValidationError("Recognition message must be 500 characters or fewer.")
 
-    duplicate_cutoff = datetime.utcnow() - timedelta(days=14)
-    duplicate_stmt = (
-        select(Recognition)
-        .where(Recognition.sender_id == sender.id)
-        .where(Recognition.recipient_id == recipient.id)
-        .where(Recognition.recognition_type == "non_monetary")
-        .where(Recognition.published_at >= duplicate_cutoff)
-        .order_by(Recognition.published_at.desc())
-    )
-    if db_session.scalar(duplicate_stmt) is not None:
+    if _has_recent_duplicate_recognition(
+        db_session,
+        sender_id=sender.id,
+        recipient_id=recipient.id,
+    ):
         raise RecognitionValidationError(
             "You already recognized this coworker in the last 14 days. Try again later."
         )
@@ -195,6 +191,7 @@ def create_points_recognition_request(
     sender, recipients, category, company_value, message, points = _validate_points_request_input(
         db_session,
         payload,
+        current_request_id=None,
     )
     request = PointsRecognitionRequest(
         sender=sender,
@@ -227,6 +224,7 @@ def update_points_recognition_request(
     sender, recipients, category, company_value, message, points = _validate_points_request_input(
         db_session,
         payload,
+        current_request_id=request_id,
     )
     request.sender = sender
     request.category = category
@@ -361,6 +359,8 @@ def moderate_recognition(
 def _validate_points_request_input(
     db_session: Session,
     payload: PointsRecognitionInput,
+    *,
+    current_request_id: Optional[int],
 ) -> tuple[Employee, list[Employee], str, Optional[str], str, int]:
     sender = db_session.get(Employee, payload.sender_id)
     if sender is None or not sender.can_participate:
@@ -402,7 +402,83 @@ def _validate_points_request_input(
     if payload.points not in POINTS_PRESET_OPTIONS:
         raise PointsRecognitionError("Choose a valid points amount.")
 
+    for recipient in recipients:
+        if _has_recent_duplicate_recognition(
+            db_session,
+            sender_id=sender.id,
+            recipient_id=recipient.id,
+            exclude_points_request_id=current_request_id,
+        ):
+            raise PointsRecognitionError(
+                "You already recognized one or more selected coworkers in the last 14 days. Try again later."
+            )
+
     return sender, recipients, category, company_value, message, payload.points
+
+
+def _has_recent_duplicate_recognition(
+    db_session: Session,
+    *,
+    sender_id: int,
+    recipient_id: int,
+    exclude_points_request_id: Optional[int] = None,
+) -> bool:
+    duplicate_cutoff = datetime.utcnow() - timedelta(days=DUPLICATE_RECOGNITION_COOLDOWN_DAYS)
+    return _has_recent_non_monetary_duplicate(
+        db_session,
+        sender_id=sender_id,
+        recipient_id=recipient_id,
+        duplicate_cutoff=duplicate_cutoff,
+    ) or _has_recent_points_duplicate(
+        db_session,
+        sender_id=sender_id,
+        recipient_id=recipient_id,
+        duplicate_cutoff=duplicate_cutoff,
+        exclude_points_request_id=exclude_points_request_id,
+    )
+
+
+def _has_recent_non_monetary_duplicate(
+    db_session: Session,
+    *,
+    sender_id: int,
+    recipient_id: int,
+    duplicate_cutoff: datetime,
+) -> bool:
+    duplicate_stmt = (
+        select(Recognition.id)
+        .where(Recognition.sender_id == sender_id)
+        .where(Recognition.recipient_id == recipient_id)
+        .where(Recognition.recognition_type == "non_monetary")
+        .where(Recognition.published_at >= duplicate_cutoff)
+        .order_by(Recognition.published_at.desc())
+    )
+    return db_session.scalar(duplicate_stmt) is not None
+
+
+def _has_recent_points_duplicate(
+    db_session: Session,
+    *,
+    sender_id: int,
+    recipient_id: int,
+    duplicate_cutoff: datetime,
+    exclude_points_request_id: Optional[int],
+) -> bool:
+    duplicate_stmt = (
+        select(PointsRecognitionRecipient.id)
+        .join(
+            PointsRecognitionRequest,
+            PointsRecognitionRecipient.request_id == PointsRecognitionRequest.id,
+        )
+        .where(PointsRecognitionRequest.sender_id == sender_id)
+        .where(PointsRecognitionRecipient.recipient_id == recipient_id)
+        .where(PointsRecognitionRequest.status == "pending_approval")
+        .where(PointsRecognitionRequest.updated_at >= duplicate_cutoff)
+        .order_by(PointsRecognitionRequest.updated_at.desc(), PointsRecognitionRequest.id.desc())
+    )
+    if exclude_points_request_id is not None:
+        duplicate_stmt = duplicate_stmt.where(PointsRecognitionRequest.id != exclude_points_request_id)
+    return db_session.scalar(duplicate_stmt) is not None
 
 
 def _get_points_request_for_sender(
