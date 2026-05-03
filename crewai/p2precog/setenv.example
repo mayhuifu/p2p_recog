@@ -1,0 +1,5 @@
+# Copy this file to setenv.src for local shell usage, or put the same values in .env.
+# Never commit real secrets.
+
+export OPENAI_API_KEY="your-openai-api-key"
+export ANTHROPIC_API_KEY="your-anthropic-api-key"

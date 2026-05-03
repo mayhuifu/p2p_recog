@@ -20,7 +20,13 @@ crewai install
 ```
 ### Customizing
 
-**Add your `OPENAI_API_KEY` into the `.env` file**
+Add your API keys to a local `.env` file, or copy `setenv.example` to `setenv.src`
+for shell-based local setup. Do not commit real secrets.
+
+Minimum variables used by this project:
+
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
 
 - Modify `src/p2precog/config/agents.yaml` to define your agents
 - Modify `src/p2precog/config/tasks.yaml` to define your tasks
