@@ -22,6 +22,14 @@ def create_app(test_config: Optional[dict] = None) -> Flask:
         LOGIN_RATE_LIMIT_PER_EMAIL=int(os.getenv("LOGIN_RATE_LIMIT_PER_EMAIL", "3")),
         LOGIN_RATE_LIMIT_PER_IP=int(os.getenv("LOGIN_RATE_LIMIT_PER_IP", "10")),
         LOGIN_RATE_LIMIT_WINDOW_SECONDS=int(os.getenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "300")),
+        SMTP_HOST=os.getenv("SMTP_HOST"),
+        SMTP_PORT=int(os.getenv("SMTP_PORT", "587")),
+        SMTP_USERNAME=os.getenv("SMTP_USERNAME"),
+        SMTP_PASSWORD=os.getenv("SMTP_PASSWORD"),
+        SMTP_FROM_EMAIL=os.getenv("SMTP_FROM_EMAIL"),
+        SMTP_USE_TLS=_env_flag("SMTP_USE_TLS", default=True),
+        SMTP_USE_SSL=_env_flag("SMTP_USE_SSL", default=False),
+        SMTP_TIMEOUT_SECONDS=int(os.getenv("SMTP_TIMEOUT_SECONDS", "30")),
     )
     if test_config:
         app.config.update(test_config)
@@ -41,3 +49,10 @@ def _split_env_list(env_name: str, *, default: list[str]) -> list[str]:
     if not raw:
         return list(default)
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _env_flag(env_name: str, *, default: bool) -> bool:
+    raw = os.getenv(env_name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}

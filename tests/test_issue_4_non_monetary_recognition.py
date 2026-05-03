@@ -1,4 +1,5 @@
 import unittest
+import tempfile
 
 from recognition_portal import create_app
 from recognition_portal.auth import build_session_user
@@ -77,6 +78,57 @@ class NonMonetaryRecognitionTests(unittest.TestCase):
         self.assertEqual(len(messages), 2)
         self.assertEqual(messages[0]["recipient_email"], "katherine@example.com")
         self.assertEqual(messages[1]["recipient_email"], "barbara@example.com")
+
+    def test_non_monetary_recognition_persists_notifications_on_file_backed_sqlite(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app(
+                {
+                    "TESTING": True,
+                    "SECRET_KEY": "test",
+                    "DATABASE_URL": f"sqlite:///{temp_dir}/portal.db",
+                    "ALLOWED_LOGIN_DOMAINS": ["example.com"],
+                    "PUBLIC_BASE_URL": "http://testserver",
+                }
+            )
+            client = app.test_client()
+
+            csv_text = "\n".join(
+                [
+                    "name,email,role,department,region,active,manager_email",
+                    "Ada Lovelace,ada@example.com,admin,Operations,US,yes,",
+                    "Grace Hopper,grace@example.com,manager,Engineering,US,yes,ada@example.com",
+                    "Alan Turing,alan@example.com,employee,Engineering,EU,yes,grace@example.com",
+                    "Barbara Liskov,barbara@example.com,manager,Product,US,yes,ada@example.com",
+                    "Katherine Johnson,katherine@example.com,employee,Engineering,US,yes,barbara@example.com",
+                ]
+            )
+            with app.app_context():
+                with session_scope(app) as session:
+                    import_employees_from_csv(session, csv_text)
+                    session_user = build_session_user(session, "alan@example.com")
+            with client.session_transaction() as client_session:
+                client_session["user_session"] = {
+                    "email": session_user.email,
+                    "role": session_user.role,
+                    "access_state": session_user.access_state,
+                    "employee_id": session_user.employee_id,
+                    "display_name": session_user.display_name,
+                }
+
+            response = client.post(
+                "/recognitions/non-monetary",
+                data={
+                    "recipient_id": "5",
+                    "category": "Teamwork",
+                    "company_value": "Trust",
+                    "message": "Katherine stepped in fast and unblocked the release with excellent pairing help.",
+                },
+                follow_redirects=True,
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b"Recognition published to the company feed.", response.data)
+            self.assertEqual(len(delivered_messages(app)), 2)
 
     def test_self_recognition_is_blocked(self) -> None:
         self._login_as("alan@example.com")

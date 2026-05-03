@@ -1,4 +1,5 @@
 import re
+import tempfile
 import unittest
 
 from recognition_portal import create_app
@@ -50,6 +51,31 @@ class MagicLinkAuthTests(unittest.TestCase):
                 tokens = session.query(LoginToken).all()
                 self.assertEqual(len(tokens), 1)
                 self.assertEqual(tokens[0].status, "pending")
+
+    def test_login_request_persists_token_and_notification_on_file_backed_sqlite(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = create_app(
+                {
+                    "TESTING": True,
+                    "SECRET_KEY": "test",
+                    "DATABASE_URL": f"sqlite:///{temp_dir}/portal.db",
+                    "ALLOWED_LOGIN_DOMAINS": ["example.com"],
+                    "PUBLIC_BASE_URL": "http://testserver",
+                }
+            )
+            client = app.test_client()
+
+            response = client.post("/login", data={"email": "ada@example.com"}, follow_redirects=True)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b"Check your email for a magic sign-in link.", response.data)
+            self.assertEqual(delivered_messages(app)[-1]["recipient_email"], "ada@example.com")
+
+            with app.app_context():
+                with session_scope(app) as session:
+                    tokens = session.query(LoginToken).all()
+                    self.assertEqual(len(tokens), 1)
+                    self.assertEqual(tokens[0].status, "pending")
 
     def test_active_employee_can_consume_token_and_access_admin_route(self) -> None:
         self._seed_directory()

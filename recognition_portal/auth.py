@@ -118,6 +118,7 @@ def create_magic_link_request(app: Flask, db_session: Session, email: str, reque
         recipient_email=normalized_email,
         subject="Your P2P Recognition sign-in link",
         body=build_magic_link_email(app, token),
+        db_session=db_session,
     )
     return login_token
 

@@ -125,6 +125,7 @@ def create_non_monetary_recognition(app, db_session: Session, payload: Recogniti
             f"{sender.name} recognized you for {category}.\n\n"
             f"Message:\n{message}"
         ),
+        db_session=db_session,
     )
     if recipient.manager is not None:
         send_email(
@@ -136,6 +137,7 @@ def create_non_monetary_recognition(app, db_session: Session, payload: Recogniti
                 f"{sender.name} recognized {recipient.name} for {category}.\n\n"
                 f"Message:\n{message}"
             ),
+            db_session=db_session,
         )
 
     return recognition
@@ -352,6 +354,7 @@ def moderate_recognition(
             f"Your recognition for {recognition.recipient.name} was {action_type} by {actor.name}.\n\n"
             f"Reason:\n{reason.strip()}"
         ),
+        db_session=db_session,
     )
     return recognition
 

@@ -5,6 +5,7 @@ Lightweight internal recognition web app built with Flask and SQLAlchemy.
 The current codebase supports:
 - employee directory management
 - magic-link sign-in
+- optional SMTP-based real email delivery
 - immediate publication of non-monetary recognition
 - sender-side points recognition requests with pending/edit/cancel/delete flows
 - basic moderation for published non-monetary posts
@@ -48,6 +49,14 @@ By default the app starts at `http://127.0.0.1:5000`.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | `sqlite:///instance/portal.db` | Database connection string |
+| `SMTP_HOST` | unset | SMTP server hostname |
+| `SMTP_PORT` | `587` | SMTP server port |
+| `SMTP_USERNAME` | unset | SMTP username |
+| `SMTP_PASSWORD` | unset | SMTP password |
+| `SMTP_FROM_EMAIL` | unset | From address for outgoing mail |
+| `SMTP_USE_TLS` | `true` | Enable STARTTLS for SMTP |
+| `SMTP_USE_SSL` | `false` | Use implicit SSL SMTP |
+| `SMTP_TIMEOUT_SECONDS` | `30` | SMTP timeout in seconds |
 
 ### Application defaults in code
 
@@ -62,8 +71,9 @@ These are set in `recognition_portal/__init__.py` today:
 
 Notes:
 - The default database is SQLite stored under `instance/portal.db`.
-- Outbound email is currently a development stub: messages are printed to stdout and stored in the `notification_events` table.
-- Only `DATABASE_URL` is environment-driven right now.
+- Email events are always stored in `notification_events` and appended to the in-process outbox.
+- Real email is sent only when `SMTP_HOST` and `SMTP_FROM_EMAIL` are configured.
+- If SMTP is not configured, the app stays in local-only development mode for email.
 - If you want different login domains, public URL, or secret handling, update `create_app()` in `recognition_portal/__init__.py`.
 
 ## First-Time Bootstrap
@@ -106,8 +116,9 @@ After that, you can sign in as `ada@example.com` and use the admin UI normally.
 1. Open `http://127.0.0.1:5000/login`
 2. Enter a company email such as `ada@example.com`
 3. Submit the form
-4. Copy the magic-link URL printed in the terminal
-5. Open that URL in the browser
+4. If SMTP is configured, open the email in your mailbox
+5. If SMTP is not configured, copy the magic-link URL from the local notification output or inspect the latest notification event
+6. Open that URL in the browser
 
 If the email exists in the employee directory and is active, you will get full access based on role.
 
@@ -202,7 +213,7 @@ Key modules:
 - `recognition_portal/employee_directory.py`: employee import and directory operations
 - `recognition_portal/recognitions.py`: recognition and points-request business rules
 - `recognition_portal/web.py`: Flask routes and form handling
-- `recognition_portal/notifications.py`: development email stub and notification event storage
+- `recognition_portal/notifications.py`: notification event storage and optional SMTP delivery
 
 ## Commands
 
@@ -224,6 +235,30 @@ Run a narrower test slice:
 PYTHONPATH=. pytest -q tests/test_issue_6_points_recognition.py
 ```
 
+## SMTP Email Setup
+
+To send real email, configure SMTP before starting the app:
+
+```bash
+cd /Users/huifu/Project/p2p_recog
+export SECRET_KEY='dev-secret-change-me'
+export PUBLIC_BASE_URL='http://127.0.0.1:5000'
+export SMTP_HOST='smtp.yourcompany.com'
+export SMTP_PORT='587'
+export SMTP_USERNAME='your-smtp-user'
+export SMTP_PASSWORD='your-smtp-password'
+export SMTP_FROM_EMAIL='noreply@yourcompany.com'
+export SMTP_USE_TLS='true'
+export SMTP_USE_SSL='false'
+python app.py --debug
+```
+
+Notes:
+- Use `SMTP_USE_SSL=true` for implicit SSL servers, commonly on port `465`.
+- Leave `SMTP_USE_TLS=true` for STARTTLS servers, commonly on port `587`.
+- If your SMTP relay does not require authentication, leave `SMTP_USERNAME` and `SMTP_PASSWORD` unset.
+- Magic-link login emails, recognition notifications, and moderation notifications all use the same SMTP settings.
+
 ## Current Feature Status
 
 Implemented:
@@ -234,6 +269,7 @@ Implemented:
 - points recognition request draft/pending flows
 - basic moderation
 - regression coverage for issues `#6` through `#13`
+- optional SMTP delivery for all notification emails
 
 Not implemented yet:
 - manager approval actions for points requests
@@ -241,12 +277,11 @@ Not implemented yet:
 - approved/rejected points lifecycle
 - ledger and balances
 - redemption workflows
-- production email integration
 - initial admin bootstrap through the browser
 
 ## Known Limitations
 
-- Email delivery is simulated by printing messages to stdout.
+- If SMTP is not configured, email stays local-only and is not delivered to a real mailbox.
 - The first admin must be seeded outside the UI.
 - SQLite is fine for local development but not a production deployment plan.
 - The repo currently has no dedicated migrations system; tables are created from SQLAlchemy metadata on startup.
