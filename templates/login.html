@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}Sign in{% endblock %}
+
+{% block content %}
+  <section class="panel stack" style="max-width: 38rem; margin: 0 auto;">
+    <div>
+      <span class="eyebrow">Issue #3 magic-link auth</span>
+      <h1>Sign in with your company email</h1>
+      <p>
+        We send a one-time sign-in link instead of using a password. Access is
+        still gated by your directory status after sign-in.
+      </p>
+    </div>
+
+    <form method="post" class="stack">
+      <label class="field">
+        <span>Company email</span>
+        <input type="email" name="email" value="{{ requested_email }}" placeholder="you@example.com" required>
+      </label>
+      <div class="nav">
+        <button class="button-primary" type="submit">Send sign-in link</button>
+        <a href="{{ url_for('index') }}">Back to overview</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}

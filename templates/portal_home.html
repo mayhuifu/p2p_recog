@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Portal home{% endblock %}
+
+{% block content %}
+  <section class="panel stack">
+    <div>
+      <span class="eyebrow">Signed in</span>
+      <h1>Welcome, {{ user.display_name }}</h1>
+      <p>
+        Issue #3 provides session auth and access gating. Recognition workflows
+        are still pending later slices, but your role-aware portal entry is now
+        established.
+      </p>
+    </div>
+
+    <div class="grid grid-3">
+      <div class="metric">
+        <span class="eyebrow">Role</span>
+        <strong>{{ user.role }}</strong>
+        <span class="caption">Session role resolved from the employee directory</span>
+      </div>
+      <div class="metric">
+        <span class="eyebrow">Access state</span>
+        <strong>{{ user.access_state }}</strong>
+        <span class="caption">Active employees can reach protected portal workflows</span>
+      </div>
+      <div class="metric">
+        <span class="eyebrow">Email</span>
+        <strong style="font-size: 1.2rem;">{{ user.email }}</strong>
+        <span class="caption">Magic-link identity used for this session</span>
+      </div>
+    </div>
+
+    {% if user.access_state == "active" %}
+      <div class="panel">
+        <h2>Access granted</h2>
+        <p>You are an active employee and can enter protected portal routes.</p>
+        {% if user.role == "admin" %}
+          <div class="nav">
+            <a class="button-primary" href="{{ url_for('admin_employees') }}">Open employee directory</a>
+            <a href="{{ url_for('import_employees') }}">Import employees</a>
+          </div>
+        {% endif %}
+      </div>
+    {% elif user.access_state == "inactive" %}
+      <div class="panel">
+        <h2>Signed in, but inactive</h2>
+        <p>
+          Your email matches the directory, but your employee record is marked
+          inactive. Admin must reactivate the record before you can use portal
+          workflows.
+        </p>
+      </div>
+    {% else %}
+      <div class="panel">
+        <h2>Signed in, pending directory approval</h2>
+        <p>
+          Your company email is valid, but no active employee record exists yet.
+          Admin must finish your directory setup before you can use the portal.
+        </p>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

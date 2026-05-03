@@ -78,6 +78,10 @@
         color: white;
         border-color: var(--accent);
       }
+      .button-quiet,
+      button.button-quiet {
+        background: transparent;
+      }
       .panel {
         background: rgba(255, 253, 248, 0.95);
         border: 1px solid var(--line);
@@ -190,13 +194,23 @@
     <div class="shell">
       <header class="topbar">
         <a class="brand" href="{{ url_for('index') }}">
-          <span class="eyebrow">Issue #2 foundation slice</span>
+          <span class="eyebrow">P2P Recognition build slices</span>
           <strong>P2P Recognition Portal</strong>
         </a>
         <nav class="nav">
-          <a href="{{ url_for('index') }}">Overview</a>
-          <a href="{{ url_for('admin_employees') }}">Employee directory</a>
-          <a href="{{ url_for('import_employees') }}">Import CSV</a>
+          {% if current_user %}
+            <a href="{{ url_for('portal_home') }}">Portal home</a>
+            {% if current_user.role == "admin" and current_user.access_state == "active" %}
+              <a href="{{ url_for('admin_employees') }}">Employee directory</a>
+              <a href="{{ url_for('import_employees') }}">Import CSV</a>
+            {% endif %}
+            <form method="post" action="{{ url_for('logout') }}" style="display: inline;">
+              <button class="button-quiet" type="submit">Sign out</button>
+            </form>
+          {% else %}
+            <a href="{{ url_for('index') }}">Overview</a>
+            <a class="button-primary" href="{{ url_for('login') }}">Sign in</a>
+          {% endif %}
         </nav>
       </header>
 
