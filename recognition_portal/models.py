@@ -82,3 +82,17 @@ class Recognition(Base):
 
     sender: Mapped["Employee"] = relationship("Employee", foreign_keys=[sender_id])
     recipient: Mapped["Employee"] = relationship("Employee", foreign_keys=[recipient_id])
+
+
+class RecognitionModerationAction(Base):
+    __tablename__ = "recognition_moderation_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    recognition_id: Mapped[int] = mapped_column(ForeignKey("recognitions.id"), nullable=False, index=True)
+    actor_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    recognition: Mapped["Recognition"] = relationship("Recognition")
+    actor: Mapped["Employee"] = relationship("Employee")

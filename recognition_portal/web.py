@@ -18,10 +18,14 @@ from .recognitions import (
     COMPANY_VALUES,
     RECOGNITION_CATEGORIES,
     RecognitionCreateInput,
+    RecognitionModerationError,
     RecognitionValidationError,
+    can_moderate_recognition,
     create_non_monetary_recognition,
+    list_all_recognitions_for_admin,
     list_employee_recognitions,
     list_feed_recognitions,
+    moderate_recognition,
 )
 
 
@@ -110,6 +114,7 @@ def register_routes(app: Flask) -> None:
         feed = []
         sent = []
         received = []
+        moderation_queue = []
         if user.employee_id is not None:
             with session_scope(app) as db_session:
                 employee = db_session.get(Employee, user.employee_id)
@@ -121,6 +126,8 @@ def register_routes(app: Flask) -> None:
                     ]
                     feed = list_feed_recognitions(db_session)
                     sent, received = list_employee_recognitions(db_session, user.employee_id)
+                    if user.role == "admin":
+                        moderation_queue = list_all_recognitions_for_admin(db_session)
         return render_template(
             "portal_home.html",
             user=user,
@@ -129,9 +136,11 @@ def register_routes(app: Flask) -> None:
             feed=feed,
             sent=sent,
             received=received,
+            moderation_queue=moderation_queue,
             recognition_categories=RECOGNITION_CATEGORIES,
             company_values=COMPANY_VALUES,
             form_data={"recipient_id": "", "category": "", "company_value": "", "message": ""},
+            can_moderate_recognition=can_moderate_recognition,
         )
 
     @app.post("/recognitions/non-monetary")
@@ -178,10 +187,33 @@ def register_routes(app: Flask) -> None:
             feed=feed,
             sent=sent,
             received=received,
+            moderation_queue=[],
             recognition_categories=RECOGNITION_CATEGORIES,
             company_values=COMPANY_VALUES,
             form_data=form_data,
+            can_moderate_recognition=can_moderate_recognition,
         )
+
+    @app.post("/recognitions/<int:recognition_id>/moderate")
+    @active_employee_required
+    def moderate_non_monetary_recognition(recognition_id: int):
+        user = g.current_user
+        action_type = request.form.get("action_type", "").strip()
+        reason = request.form.get("reason", "").strip()
+        try:
+            with session_scope(app) as db_session:
+                moderate_recognition(
+                    app,
+                    db_session,
+                    recognition_id=recognition_id,
+                    actor_id=user.employee_id,
+                    action_type=action_type,
+                    reason=reason,
+                )
+            flash(f"Recognition {action_type}.", "success")
+        except RecognitionModerationError as exc:
+            flash(str(exc), "danger")
+        return redirect(url_for("portal_home"))
 
     @app.get("/admin/employees")
     @role_required("admin")

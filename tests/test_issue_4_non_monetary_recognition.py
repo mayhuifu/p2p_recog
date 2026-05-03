@@ -29,7 +29,8 @@ class NonMonetaryRecognitionTests(unittest.TestCase):
                 "Ada Lovelace,ada@example.com,admin,Operations,US,yes,",
                 "Grace Hopper,grace@example.com,manager,Engineering,US,yes,ada@example.com",
                 "Alan Turing,alan@example.com,employee,Engineering,EU,yes,grace@example.com",
-                "Katherine Johnson,katherine@example.com,employee,Engineering,US,yes,grace@example.com",
+                "Barbara Liskov,barbara@example.com,manager,Product,US,yes,ada@example.com",
+                "Katherine Johnson,katherine@example.com,employee,Engineering,US,yes,barbara@example.com",
             ]
         )
         with self.app.app_context():
@@ -54,7 +55,7 @@ class NonMonetaryRecognitionTests(unittest.TestCase):
         response = self.client.post(
             "/recognitions/non-monetary",
             data={
-                "recipient_id": "4",
+                "recipient_id": "5",
                 "category": "Teamwork",
                 "company_value": "Trust",
                 "message": "Katherine stepped in fast and unblocked the release with excellent pairing help.",
@@ -75,7 +76,7 @@ class NonMonetaryRecognitionTests(unittest.TestCase):
         messages = delivered_messages(self.app)
         self.assertEqual(len(messages), 2)
         self.assertEqual(messages[0]["recipient_email"], "katherine@example.com")
-        self.assertEqual(messages[1]["recipient_email"], "grace@example.com")
+        self.assertEqual(messages[1]["recipient_email"], "barbara@example.com")
 
     def test_self_recognition_is_blocked(self) -> None:
         self._login_as("alan@example.com")
@@ -94,7 +95,7 @@ class NonMonetaryRecognitionTests(unittest.TestCase):
     def test_duplicate_recognition_is_blocked_for_fourteen_days(self) -> None:
         self._login_as("alan@example.com")
         payload = {
-            "recipient_id": "4",
+            "recipient_id": "5",
             "category": "Ownership",
             "company_value": "",
             "message": "Katherine took ownership of the customer bug and stayed with it until everything was resolved.",
@@ -108,7 +109,7 @@ class NonMonetaryRecognitionTests(unittest.TestCase):
         self.client.post(
             "/recognitions/non-monetary",
             data={
-                "recipient_id": "4",
+                "recipient_id": "5",
                 "category": "Customer Impact",
                 "company_value": "Customer Care",
                 "message": "Katherine handled the support escalation with calm follow-through and clear updates.",
@@ -119,6 +120,99 @@ class NonMonetaryRecognitionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Recent recognitions", response.data)
         self.assertIn(b"Customer Impact", response.data)
+
+    def test_sender_manager_can_hide_recognition_and_sender_gets_notified(self) -> None:
+        self._login_as("alan@example.com")
+        self.client.post(
+            "/recognitions/non-monetary",
+            data={
+                "recipient_id": "5",
+                "category": "Teamwork",
+                "company_value": "",
+                "message": "Katherine jumped into incident response and helped team recover quickly.",
+            },
+            follow_redirects=True,
+        )
+
+        self._login_as("grace@example.com")
+        response = self.client.post(
+            "/recognitions/1/moderate",
+            data={"action_type": "hidden", "reason": "Manager review requested while content is checked."},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Recognition hidden.", response.data)
+        self.assertNotIn(b"Katherine jumped into incident response", response.data)
+
+        messages = delivered_messages(self.app)
+        self.assertEqual(messages[-1]["recipient_email"], "alan@example.com")
+        self.assertIn("hidden", messages[-1]["subject"])
+
+    def test_recipient_manager_can_remove_recognition(self) -> None:
+        self._login_as("alan@example.com")
+        self.client.post(
+            "/recognitions/non-monetary",
+            data={
+                "recipient_id": "5",
+                "category": "Ownership",
+                "company_value": "",
+                "message": "Katherine owned tricky product handoff and kept stakeholders aligned all week long.",
+            },
+            follow_redirects=True,
+        )
+
+        self._login_as("barbara@example.com")
+        response = self.client.post(
+            "/recognitions/1/moderate",
+            data={"action_type": "removed", "reason": "Post removed after recipient-side escalation."},
+            follow_redirects=True,
+        )
+        self.assertIn(b"Recognition removed.", response.data)
+
+    def test_unauthorized_employee_cannot_moderate(self) -> None:
+        self._login_as("alan@example.com")
+        self.client.post(
+            "/recognitions/non-monetary",
+            data={
+                "recipient_id": "5",
+                "category": "Innovation",
+                "company_value": "",
+                "message": "Katherine found clever path through difficult edge case and documented it clearly.",
+            },
+            follow_redirects=True,
+        )
+
+        self._login_as("katherine@example.com")
+        response = self.client.post(
+            "/recognitions/1/moderate",
+            data={"action_type": "hidden", "reason": "Trying unauthorized moderation."},
+            follow_redirects=True,
+        )
+        self.assertIn(b"do not have permission", response.data)
+
+    def test_admin_review_queue_shows_moderated_recognition(self) -> None:
+        self._login_as("alan@example.com")
+        self.client.post(
+            "/recognitions/non-monetary",
+            data={
+                "recipient_id": "5",
+                "category": "Above and Beyond",
+                "company_value": "",
+                "message": "Katherine stayed late, tied off open work, and kept customers updated without dropping details.",
+            },
+            follow_redirects=True,
+        )
+        self._login_as("grace@example.com")
+        self.client.post(
+            "/recognitions/1/moderate",
+            data={"action_type": "hidden", "reason": "Temporary review hold."},
+            follow_redirects=True,
+        )
+
+        self._login_as("ada@example.com")
+        response = self.client.get("/portal")
+        self.assertIn(b"Recognition review queue", response.data)
+        self.assertIn(b"hidden", response.data)
 
 
 if __name__ == "__main__":

@@ -103,6 +103,19 @@
                     {% if recognition.company_value %}· {{ recognition.company_value }}{% endif %}
                   </p>
                   <p style="color: var(--ink);">{{ recognition.message }}</p>
+                  {% if user.employee_id and can_moderate_recognition(employee, recognition) %}
+                    <form method="post" action="{{ url_for('moderate_non_monetary_recognition', recognition_id=recognition.id) }}" class="stack">
+                      <input type="hidden" name="recognition_id" value="{{ recognition.id }}">
+                      <label class="field">
+                        <span>Moderation reason</span>
+                        <input type="text" name="reason" placeholder="Why hide or remove this post?" required>
+                      </label>
+                      <div class="nav">
+                        <button type="submit" name="action_type" value="hidden">Hide from feed</button>
+                        <button type="submit" name="action_type" value="removed">Remove completely</button>
+                      </div>
+                    </form>
+                  {% endif %}
                 </article>
               {% endfor %}
             {% else %}
@@ -144,6 +157,42 @@
           </div>
         </div>
       </div>
+      {% if user.role == "admin" %}
+        <div class="panel stack">
+          <div>
+            <span class="eyebrow">Admin oversight</span>
+            <h2>Recognition review queue</h2>
+          </div>
+          {% if moderation_queue %}
+            <div class="panel" style="padding: 0.4rem 1rem;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Sender</th>
+                    <th>Recipient</th>
+                    <th>Category</th>
+                    <th>Message</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for recognition in moderation_queue %}
+                    <tr>
+                      <td>{{ recognition.status }}</td>
+                      <td>{{ recognition.sender.name }}</td>
+                      <td>{{ recognition.recipient.name }}</td>
+                      <td>{{ recognition.category }}</td>
+                      <td>{{ recognition.message }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <p>No recognitions available for review.</p>
+          {% endif %}
+        </div>
+      {% endif %}
     {% elif user.access_state == "inactive" %}
       <div class="panel">
         <h2>Signed in, but inactive</h2>
