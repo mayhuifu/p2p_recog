@@ -96,3 +96,53 @@ class RecognitionModerationAction(Base):
 
     recognition: Mapped["Recognition"] = relationship("Recognition")
     actor: Mapped["Employee"] = relationship("Employee")
+
+
+class PointsRecognitionRequest(Base):
+    __tablename__ = "points_recognition_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    company_value: Mapped[Optional[str]] = mapped_column(String(64))
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_points_per_recipient: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending_approval")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    sender: Mapped["Employee"] = relationship("Employee", foreign_keys=[sender_id])
+    recipients: Mapped[list["PointsRecognitionRecipient"]] = relationship(
+        "PointsRecognitionRecipient",
+        back_populates="request",
+        cascade="all, delete-orphan",
+        order_by="PointsRecognitionRecipient.id",
+    )
+
+    @property
+    def recipient_count(self) -> int:
+        return len(self.recipients)
+
+    @property
+    def total_requested_points(self) -> int:
+        return self.requested_points_per_recipient * self.recipient_count
+
+
+class PointsRecognitionRecipient(Base):
+    __tablename__ = "points_recognition_recipients"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_id: Mapped[int] = mapped_column(ForeignKey("points_recognition_requests.id"), nullable=False, index=True)
+    recipient_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), nullable=False, index=True)
+    approved_points: Mapped[Optional[int]] = mapped_column(Integer)
+
+    request: Mapped["PointsRecognitionRequest"] = relationship(
+        "PointsRecognitionRequest",
+        back_populates="recipients",
+    )
+    recipient: Mapped["Employee"] = relationship("Employee", foreign_keys=[recipient_id])

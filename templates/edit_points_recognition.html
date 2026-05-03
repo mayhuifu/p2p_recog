@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Edit points recognition{% endblock %}
+
+{% block content %}
+  <section class="panel stack">
+    <div>
+      <span class="eyebrow">Pending points request</span>
+      <h1>Edit points recognition</h1>
+      <p>Any edit keeps this request in pending manager review.</p>
+    </div>
+
+    <form method="post" class="stack">
+      <label class="field">
+        <span>Recipients</span>
+        <select name="recipient_ids" multiple size="8" required>
+          {% for colleague in employees %}
+            <option value="{{ colleague.id }}" {% if colleague.id|string in form_data.recipient_ids %}selected{% endif %}>
+              {{ colleague.name }} · {{ colleague.department or colleague.role }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <div class="split">
+        <label class="field">
+          <span>Category</span>
+          <select name="category" required>
+            <option value="">Select category</option>
+            {% for category in recognition_categories %}
+              <option value="{{ category }}" {% if form_data.category == category %}selected{% endif %}>{{ category }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Company value (optional)</span>
+          <select name="company_value">
+            <option value="">No value tag</option>
+            {% for value in company_values %}
+              <option value="{{ value }}" {% if form_data.company_value == value %}selected{% endif %}>{{ value }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+
+      <label class="field">
+        <span>Points per recipient</span>
+        <select name="points" required>
+          <option value="">Select points</option>
+          {% for points in points_preset_options %}
+            <option value="{{ points }}" {% if form_data.points == points|string %}selected{% endif %}>{{ points }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Recognition message</span>
+        <textarea name="message" minlength="20" maxlength="500" required>{{ form_data.message }}</textarea>
+      </label>
+
+      <div class="nav">
+        <button class="button-primary" type="submit">Save pending request</button>
+        <a href="{{ url_for('portal_home') }}">Back to portal</a>
+      </div>
+    </form>
+
+    <div class="panel" style="background: white;">
+      <p class="caption">
+        Current request:
+        {{ request_record.recipient_count }} recipients ·
+        {{ request_record.requested_points_per_recipient }} each ·
+        {{ request_record.total_requested_points }} total points
+      </p>
+    </div>
+  </section>
+{% endblock %}

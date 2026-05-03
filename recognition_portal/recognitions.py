@@ -7,7 +7,13 @@ from typing import Optional
 from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from .models import Employee, Recognition, RecognitionModerationAction
+from .models import (
+    Employee,
+    PointsRecognitionRecipient,
+    PointsRecognitionRequest,
+    Recognition,
+    RecognitionModerationAction,
+)
 from .notifications import send_email
 
 
@@ -27,12 +33,18 @@ COMPANY_VALUES = [
     "Customer Care",
 ]
 
+POINTS_PRESET_OPTIONS = [10, 25, 50]
+
 
 class RecognitionValidationError(ValueError):
     pass
 
 
 class RecognitionModerationError(ValueError):
+    pass
+
+
+class PointsRecognitionError(ValueError):
     pass
 
 
@@ -43,6 +55,16 @@ class RecognitionCreateInput:
     category: str
     company_value: Optional[str]
     message: str
+
+
+@dataclass
+class PointsRecognitionInput:
+    sender_id: int
+    recipient_ids: list[int]
+    category: str
+    company_value: Optional[str]
+    message: str
+    points: int
 
 
 def create_non_monetary_recognition(app, db_session: Session, payload: RecognitionCreateInput) -> Recognition:
@@ -166,6 +188,116 @@ def list_all_recognitions_for_admin(db_session: Session, limit: int = 30) -> lis
     return list(db_session.scalars(stmt))
 
 
+def create_points_recognition_request(
+    db_session: Session,
+    payload: PointsRecognitionInput,
+) -> PointsRecognitionRequest:
+    sender, recipients, category, company_value, message, points = _validate_points_request_input(
+        db_session,
+        payload,
+    )
+    request = PointsRecognitionRequest(
+        sender=sender,
+        category=category,
+        company_value=company_value,
+        message=message,
+        requested_points_per_recipient=points,
+        status="pending_approval",
+        recipients=[
+            PointsRecognitionRecipient(recipient=recipient)
+            for recipient in recipients
+        ],
+    )
+    db_session.add(request)
+    db_session.flush()
+    return request
+
+
+def update_points_recognition_request(
+    db_session: Session,
+    *,
+    request_id: int,
+    sender_id: int,
+    payload: PointsRecognitionInput,
+) -> PointsRecognitionRequest:
+    request = _get_points_request_for_sender(db_session, request_id=request_id, sender_id=sender_id)
+    if request.status != "pending_approval":
+        raise PointsRecognitionError("Only pending points recognitions can be edited.")
+
+    sender, recipients, category, company_value, message, points = _validate_points_request_input(
+        db_session,
+        payload,
+    )
+    request.sender = sender
+    request.category = category
+    request.company_value = company_value
+    request.message = message
+    request.requested_points_per_recipient = points
+    request.status = "pending_approval"
+    request.recipients.clear()
+    request.recipients.extend(
+        PointsRecognitionRecipient(recipient=recipient)
+        for recipient in recipients
+    )
+    db_session.flush()
+    return request
+
+
+def cancel_points_recognition_request(
+    db_session: Session,
+    *,
+    request_id: int,
+    sender_id: int,
+) -> PointsRecognitionRequest:
+    request = _get_points_request_for_sender(db_session, request_id=request_id, sender_id=sender_id)
+    if request.status != "pending_approval":
+        raise PointsRecognitionError("Only pending points recognitions can be canceled.")
+    request.status = "canceled"
+    db_session.flush()
+    return request
+
+
+def delete_points_recognition_request(
+    db_session: Session,
+    *,
+    request_id: int,
+    sender_id: int,
+) -> None:
+    request = _get_points_request_for_sender(db_session, request_id=request_id, sender_id=sender_id)
+    if request.status != "pending_approval":
+        raise PointsRecognitionError("Only pending points recognitions can be deleted.")
+    db_session.delete(request)
+    db_session.flush()
+
+
+def get_points_recognition_request_for_sender(
+    db_session: Session,
+    *,
+    request_id: int,
+    sender_id: int,
+) -> PointsRecognitionRequest:
+    return _get_points_request_for_sender(db_session, request_id=request_id, sender_id=sender_id)
+
+
+def list_points_recognition_requests_for_sender(
+    db_session: Session,
+    *,
+    sender_id: int,
+    limit: int = 10,
+) -> list[PointsRecognitionRequest]:
+    stmt = (
+        select(PointsRecognitionRequest)
+        .options(
+            selectinload(PointsRecognitionRequest.sender),
+            selectinload(PointsRecognitionRequest.recipients).selectinload(PointsRecognitionRecipient.recipient),
+        )
+        .where(PointsRecognitionRequest.sender_id == sender_id)
+        .order_by(desc(PointsRecognitionRequest.updated_at), desc(PointsRecognitionRequest.id))
+        .limit(limit)
+    )
+    return list(db_session.scalars(stmt))
+
+
 def can_moderate_recognition(actor: Employee, recognition: Recognition) -> bool:
     if actor.role == "admin":
         return True
@@ -224,3 +356,70 @@ def moderate_recognition(
         ),
     )
     return recognition
+
+
+def _validate_points_request_input(
+    db_session: Session,
+    payload: PointsRecognitionInput,
+) -> tuple[Employee, list[Employee], str, Optional[str], str, int]:
+    sender = db_session.get(Employee, payload.sender_id)
+    if sender is None or not sender.can_participate:
+        raise PointsRecognitionError("Your employee record is not active yet.")
+
+    if not payload.recipient_ids:
+        raise PointsRecognitionError("Select at least one coworker.")
+
+    if len(set(payload.recipient_ids)) != len(payload.recipient_ids):
+        raise PointsRecognitionError("Select each recipient only once.")
+
+    recipients = []
+    for recipient_id in payload.recipient_ids:
+        recipient = db_session.get(Employee, recipient_id)
+        if recipient is None:
+            raise PointsRecognitionError("Select valid employee recipients.")
+        if not recipient.can_participate:
+            raise PointsRecognitionError("All selected recipients must be active employees.")
+        if recipient.id == sender.id:
+            raise PointsRecognitionError("You cannot recognize yourself with points.")
+        if recipient.role == "executive":
+            raise PointsRecognitionError("Executives can only receive non-monetary recognition.")
+        recipients.append(recipient)
+
+    category = payload.category.strip()
+    if category not in RECOGNITION_CATEGORIES:
+        raise PointsRecognitionError("Choose a valid recognition category.")
+
+    company_value = (payload.company_value or "").strip() or None
+    if company_value is not None and company_value not in COMPANY_VALUES:
+        raise PointsRecognitionError("Choose a valid company value.")
+
+    message = payload.message.strip()
+    if len(message) < 20:
+        raise PointsRecognitionError("Recognition message must be at least 20 characters.")
+    if len(message) > 500:
+        raise PointsRecognitionError("Recognition message must be 500 characters or fewer.")
+
+    if payload.points not in POINTS_PRESET_OPTIONS:
+        raise PointsRecognitionError("Choose a valid points amount.")
+
+    return sender, recipients, category, company_value, message, payload.points
+
+
+def _get_points_request_for_sender(
+    db_session: Session,
+    *,
+    request_id: int,
+    sender_id: int,
+) -> PointsRecognitionRequest:
+    request = db_session.scalar(
+        select(PointsRecognitionRequest)
+        .options(
+            selectinload(PointsRecognitionRequest.sender),
+            selectinload(PointsRecognitionRequest.recipients).selectinload(PointsRecognitionRecipient.recipient),
+        )
+        .where(PointsRecognitionRequest.id == request_id)
+        .where(PointsRecognitionRequest.sender_id == sender_id)
+    )
+    if request is None:
+        raise PointsRecognitionError("Points recognition request not found.")
+    return request
