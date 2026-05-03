@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Employee directory{% endblock %}
+
+{% block content %}
+  <section class="panel stack">
+    <div class="topbar" style="margin-bottom: 0;">
+      <div>
+        <span class="eyebrow">Admin</span>
+        <h1>Employee directory</h1>
+        <p>Manage manager ownership, regions, roles, and active employee status.</p>
+      </div>
+      <div class="nav">
+        <a class="button-primary" href="{{ url_for('new_employee') }}">New employee</a>
+        <a href="{{ url_for('import_employees') }}">Import CSV</a>
+      </div>
+    </div>
+
+    {% if employees %}
+      <div class="panel" style="padding: 0.4rem 1rem;">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Department</th>
+              <th>Region</th>
+              <th>Manager</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for employee in employees %}
+              <tr>
+                <td><strong>{{ employee.name }}</strong></td>
+                <td>{{ employee.email }}</td>
+                <td>{{ employee.role }}</td>
+                <td>{{ employee.department or "—" }}</td>
+                <td>{{ employee.region or "—" }}</td>
+                <td>{{ employee.manager.name if employee.manager else "—" }}</td>
+                <td>
+                  <span class="status-pill {{ 'status-active' if employee.is_active else 'status-inactive' }}">
+                    {{ "Active" if employee.is_active else "Inactive" }}
+                  </span>
+                </td>
+                <td><a href="{{ url_for('edit_employee', employee_id=employee.id) }}">Edit</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="panel">
+        <h2>No employees yet</h2>
+        <p>Import a CSV or create the first employee record manually.</p>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

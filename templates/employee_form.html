@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block content %}
+  <section class="panel stack">
+    <div>
+      <span class="eyebrow">Admin</span>
+      <h1>{{ page_title }}</h1>
+      <p class="caption">
+        Issue #2 stores the org data that later login, approval, and reward
+        flows depend on.
+      </p>
+    </div>
+
+    <form method="post" class="stack">
+      <div class="split">
+        <label class="field">
+          <span>Name</span>
+          <input type="text" name="name" value="{{ employee.name }}" required>
+        </label>
+        <label class="field">
+          <span>Email</span>
+          <input type="email" name="email" value="{{ employee.email }}" required>
+        </label>
+      </div>
+
+      <div class="split">
+        <label class="field">
+          <span>Role</span>
+          <select name="role">
+            {% for value, label in role_options %}
+              <option value="{{ value }}" {% if employee.role == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span>Manager</span>
+          <select name="manager_id">
+            <option value="">No manager</option>
+            {% for manager in managers %}
+              <option value="{{ manager.id }}" {% if employee.manager_id == manager.id %}selected{% endif %}>
+                {{ manager.name }} · {{ manager.email }}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+
+      <div class="split">
+        <label class="field">
+          <span>Department</span>
+          <input type="text" name="department" value="{{ employee.department or '' }}">
+        </label>
+        <label class="field">
+          <span>Region</span>
+          <input type="text" name="region" value="{{ employee.region or '' }}" placeholder="US, EU, APAC...">
+        </label>
+      </div>
+
+      <label class="field">
+        <span>Participation status</span>
+        <label>
+          <input type="checkbox" name="is_active" {% if employee.is_active %}checked{% endif %}>
+          Active employees are eligible for later recognition workflows
+        </label>
+      </label>
+
+      <div class="nav">
+        <button class="button-primary" type="submit">{{ submit_label }}</button>
+        <a href="{{ url_for('admin_employees') }}">Back to directory</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Portal foundation{% endblock %}
+
+{% block content %}
+  <section class="panel stack">
+    <div>
+      <span class="eyebrow">Path Forward</span>
+      <h1>Web app foundation in place</h1>
+      <p>
+        This slice replaces the Gradio prototype path with a server-rendered web
+        app foundation. Authentication is intentionally deferred to issue #3;
+        issue #2 focuses on a durable employee directory, manager relationships,
+        region ownership, and active-employee gating.
+      </p>
+    </div>
+    <div class="grid grid-3">
+      <div class="metric">
+        <span class="eyebrow">Employees</span>
+        <strong>{{ employee_count }}</strong>
+        <span class="caption">Directory records currently loaded</span>
+      </div>
+      <div class="metric">
+        <span class="eyebrow">Active</span>
+        <strong>{{ active_count }}</strong>
+        <span class="caption">Eligible for future recognition flows</span>
+      </div>
+      <div class="metric">
+        <span class="eyebrow">Managers</span>
+        <strong>{{ manager_count }}</strong>
+        <span class="caption">Approval chain owners present in the directory</span>
+      </div>
+    </div>
+    <div class="grid grid-3">
+      <div class="metric">
+        <span class="eyebrow">Regions</span>
+        <strong>{{ region_count }}</strong>
+        <span class="caption">Catalog routing dimension for later reward slices</span>
+      </div>
+      <div class="metric">
+        <span class="eyebrow">Next</span>
+        <strong>Issue #3</strong>
+        <span class="caption">Magic-link auth will plug into this foundation next</span>
+      </div>
+      <div class="metric">
+        <span class="eyebrow">Admin actions</span>
+        <strong>2</strong>
+        <span class="caption">Import employees or edit the directory directly</span>
+      </div>
+    </div>
+  </section>
+{% endblock %}

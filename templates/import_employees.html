@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Import employees{% endblock %}
+
+{% block content %}
+  <section class="panel stack">
+    <div>
+      <span class="eyebrow">Admin</span>
+      <h1>Import employee directory from CSV</h1>
+      <p>
+        Supported columns: <code>name</code>, <code>email</code>,
+        <code>role</code>, <code>department</code>, <code>region</code>,
+        <code>active</code>, and <code>manager_email</code>.
+      </p>
+    </div>
+
+    <div class="split">
+      <div class="panel stack">
+        <h2>Upload or paste</h2>
+        <form method="post" enctype="multipart/form-data" class="stack">
+          <label class="field">
+            <span>Upload CSV file</span>
+            <input type="file" name="csv_file" accept=".csv,text/csv">
+          </label>
+          <label class="field">
+            <span>Or paste CSV text</span>
+            <textarea name="csv_text">{{ draft_csv }}</textarea>
+          </label>
+          <div class="nav">
+            <button class="button-primary" type="submit">Import employees</button>
+            <a href="{{ url_for('admin_employees') }}">Back to directory</a>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel stack">
+        <h2>Example CSV</h2>
+        <p class="caption">
+          Manager references are resolved by <code>manager_email</code>. Import
+          is atomic: if one row is invalid, nothing is written.
+        </p>
+        <textarea readonly>{{ example_csv }}</textarea>
+      </div>
+    </div>
+  </section>
+{% endblock %}
