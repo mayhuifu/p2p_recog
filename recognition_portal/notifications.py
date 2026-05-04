@@ -3,8 +3,10 @@ from __future__ import annotations
 import logging
 import os
 import smtplib
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from email.message import EmailMessage
-from typing import Dict, List, Optional
+from typing import Dict, Iterator, List, Optional
 
 from flask import Flask
 from sqlalchemy.orm import Session
@@ -76,6 +78,37 @@ def delivered_messages(app: Flask) -> List[Dict[str, str]]:
     return list(app.extensions["notification_outbox"])
 
 
+def smtp_enabled(app: Flask) -> bool:
+    return _smtp_enabled(app)
+
+
+def verify_smtp_connection(app: Flask) -> None:
+    if not _smtp_enabled(app):
+        raise RuntimeError("SMTP is not configured. Set SMTP_HOST and SMTP_FROM_EMAIL first.")
+
+    with _open_smtp_connection(app):
+        return
+
+
+def send_smtp_test_email(app: Flask, recipient_email: str) -> None:
+    if not _smtp_enabled(app):
+        raise RuntimeError("SMTP is not configured. Set SMTP_HOST and SMTP_FROM_EMAIL first.")
+    if not recipient_email.strip():
+        raise RuntimeError("Recipient email is required for SMTP test delivery.")
+
+    body = (
+        "This is a test email from the P2P Recognition Portal SMTP check.\n\n"
+        f"Sent at: {datetime.now(timezone.utc).isoformat()}"
+    )
+    payload = {
+        "event_type": "smtp_test",
+        "recipient_email": recipient_email.strip(),
+        "subject": "P2P Recognition SMTP test",
+        "body": body,
+    }
+    _deliver_via_smtp(app, payload)
+
+
 def _email_logging_enabled() -> bool:
     return os.getenv("LOG_EMAIL_EVENTS", "true").strip().lower() not in {"0", "false", "no"}
 
@@ -91,6 +124,12 @@ def _deliver_via_smtp(app: Flask, payload: Dict[str, str]) -> None:
     message["Subject"] = payload["subject"]
     message.set_content(payload["body"])
 
+    with _open_smtp_connection(app) as smtp:
+        smtp.send_message(message)
+
+
+@contextmanager
+def _open_smtp_connection(app: Flask) -> Iterator[smtplib.SMTP]:
     host = app.config["SMTP_HOST"]
     port = app.config["SMTP_PORT"]
     timeout = app.config["SMTP_TIMEOUT_SECONDS"]
@@ -105,4 +144,4 @@ def _deliver_via_smtp(app: Flask, payload: Dict[str, str]) -> None:
             smtp.starttls()
         if username:
             smtp.login(username, password or "")
-        smtp.send_message(message)
+        yield smtp

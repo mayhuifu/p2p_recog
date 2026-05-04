@@ -259,6 +259,17 @@ Notes:
 - If your SMTP relay does not require authentication, leave `SMTP_USERNAME` and `SMTP_PASSWORD` unset.
 - Magic-link login emails, recognition notifications, and moderation notifications all use the same SMTP settings.
 
+Built-in SMTP checks:
+
+```bash
+cd /Users/huifu/Project/p2p_recog
+python app.py --smtp-test
+python app.py --smtp-test-to your.name@company.com
+```
+
+- `--smtp-test` verifies SMTP connection and login, then exits.
+- `--smtp-test-to` sends a real test email using the configured SMTP settings, then exits.
+
 ## Current Feature Status
 
 Implemented:
