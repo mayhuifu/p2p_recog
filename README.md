@@ -5,7 +5,7 @@ Lightweight internal recognition web app built with Flask and SQLAlchemy.
 The current codebase supports:
 - employee directory management
 - magic-link sign-in
-- optional SMTP-based real email delivery
+- optional Outlook-plugin real email delivery
 - immediate publication of non-monetary recognition
 - sender-side points recognition requests with pending/edit/cancel/delete flows
 - basic moderation for published non-monetary posts
@@ -49,14 +49,10 @@ By default the app starts at `http://127.0.0.1:5000`.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | `sqlite:///instance/portal.db` | Database connection string |
-| `SMTP_HOST` | unset | SMTP server hostname |
-| `SMTP_PORT` | `587` | SMTP server port |
-| `SMTP_USERNAME` | unset | SMTP username |
-| `SMTP_PASSWORD` | unset | SMTP password |
-| `SMTP_FROM_EMAIL` | unset | From address for outgoing mail |
-| `SMTP_USE_TLS` | `true` | Enable STARTTLS for SMTP |
-| `SMTP_USE_SSL` | `false` | Use implicit SSL SMTP |
-| `SMTP_TIMEOUT_SECONDS` | `30` | SMTP timeout in seconds |
+| `EMAIL_DELIVERY_BACKEND` | `local` | `local` or `outlook_plugin` |
+| `CODEX_BIN` | `codex` | Codex CLI executable used for Outlook plugin delivery |
+| `OUTLOOK_PLUGIN_TIMEOUT_SECONDS` | `120` | Timeout for each Codex/Outlook send attempt |
+| `OUTLOOK_PLUGIN_WORKDIR` | unset | Optional working directory for Codex CLI execution |
 
 ### Application defaults in code
 
@@ -72,8 +68,9 @@ These are set in `recognition_portal/__init__.py` today:
 Notes:
 - The default database is SQLite stored under `instance/portal.db`.
 - Email events are always stored in `notification_events` and appended to the in-process outbox.
-- Real email is sent only when `SMTP_HOST` and `SMTP_FROM_EMAIL` are configured.
-- If SMTP is not configured, the app stays in local-only development mode for email.
+- Real email is sent only when `EMAIL_DELIVERY_BACKEND=outlook_plugin`.
+- Outlook-plugin delivery shells out to the local `codex` CLI, so it requires a machine where Codex is installed, authenticated, and connected to the Outlook Email plugin.
+- If the backend is left at `local`, the app stays in local-only development mode for email.
 - If you want different login domains, public URL, or secret handling, update `create_app()` in `recognition_portal/__init__.py`.
 
 ## First-Time Bootstrap
@@ -116,8 +113,8 @@ After that, you can sign in as `ada@example.com` and use the admin UI normally.
 1. Open `http://127.0.0.1:5000/login`
 2. Enter a company email such as `ada@example.com`
 3. Submit the form
-4. If SMTP is configured, open the email in your mailbox
-5. If SMTP is not configured, copy the magic-link URL from the local notification output or inspect the latest notification event
+4. If the Outlook plugin backend is configured, open the email in your mailbox
+5. If the backend is still `local`, copy the magic-link URL from the local notification output or inspect the latest notification event
 6. Open that URL in the browser
 
 If the email exists in the employee directory and is active, you will get full access based on role.
@@ -213,7 +210,7 @@ Key modules:
 - `recognition_portal/employee_directory.py`: employee import and directory operations
 - `recognition_portal/recognitions.py`: recognition and points-request business rules
 - `recognition_portal/web.py`: Flask routes and form handling
-- `recognition_portal/notifications.py`: notification event storage and optional SMTP delivery
+- `recognition_portal/notifications.py`: notification event storage and optional Outlook-plugin delivery
 
 ## Commands
 
@@ -235,40 +232,35 @@ Run a narrower test slice:
 PYTHONPATH=. pytest -q tests/test_issue_6_points_recognition.py
 ```
 
-## SMTP Email Setup
+## Outlook Plugin Email Setup
 
-To send real email, configure SMTP before starting the app:
+To send real email, configure the Outlook plugin backend before starting the app:
 
 ```bash
 cd /Users/huifu/Project/p2p_recog
 export SECRET_KEY='dev-secret-change-me'
 export PUBLIC_BASE_URL='http://127.0.0.1:5000'
-export SMTP_HOST='smtp.yourcompany.com'
-export SMTP_PORT='587'
-export SMTP_USERNAME='your-smtp-user'
-export SMTP_PASSWORD='your-smtp-password'
-export SMTP_FROM_EMAIL='noreply@yourcompany.com'
-export SMTP_USE_TLS='true'
-export SMTP_USE_SSL='false'
+export EMAIL_DELIVERY_BACKEND='outlook_plugin'
+export CODEX_BIN='codex'
 python app.py --debug
 ```
 
 Notes:
-- Use `SMTP_USE_SSL=true` for implicit SSL servers, commonly on port `465`.
-- Leave `SMTP_USE_TLS=true` for STARTTLS servers, commonly on port `587`.
-- If your SMTP relay does not require authentication, leave `SMTP_USERNAME` and `SMTP_PASSWORD` unset.
-- Magic-link login emails, recognition notifications, and moderation notifications all use the same SMTP settings.
+- This backend uses the local Codex CLI plus the connected Outlook Email plugin to send plain-text email.
+- The email is sent from the Outlook account connected to Codex.
+- Magic-link login emails, recognition notifications, and moderation notifications all use the same backend.
+- This is suitable for local/operator-driven environments, not a headless production deployment.
 
-Built-in SMTP checks:
+Built-in email checks:
 
 ```bash
 cd /Users/huifu/Project/p2p_recog
-python app.py --smtp-test
-python app.py --smtp-test-to your.name@company.com
+python app.py --email-backend-check
+python app.py --email-test-to your.name@company.com
 ```
 
-- `--smtp-test` verifies SMTP connection and login, then exits.
-- `--smtp-test-to` sends a real test email using the configured SMTP settings, then exits.
+- `--email-backend-check` validates that the configured backend is usable, then exits.
+- `--email-test-to` sends a real test email using the configured backend, then exits.
 
 ## Current Feature Status
 
@@ -280,7 +272,7 @@ Implemented:
 - points recognition request draft/pending flows
 - basic moderation
 - regression coverage for issues `#6` through `#13`
-- optional SMTP delivery for all notification emails
+- optional Outlook-plugin delivery for all notification emails
 
 Not implemented yet:
 - manager approval actions for points requests
@@ -292,7 +284,8 @@ Not implemented yet:
 
 ## Known Limitations
 
-- If SMTP is not configured, email stays local-only and is not delivered to a real mailbox.
+- If `EMAIL_DELIVERY_BACKEND` is left at `local`, email stays local-only and is not delivered to a real mailbox.
+- If `EMAIL_DELIVERY_BACKEND=outlook_plugin`, delivery depends on a working local Codex CLI session with Outlook Email plugin access.
 - The first admin must be seeded outside the UI.
 - SQLite is fine for local development but not a production deployment plan.
 - The repo currently has no dedicated migrations system; tables are created from SQLAlchemy metadata on startup.

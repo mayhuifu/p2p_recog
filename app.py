@@ -1,7 +1,7 @@
 import argparse
 
 from recognition_portal import create_app
-from recognition_portal.notifications import send_smtp_test_email, verify_smtp_connection
+from recognition_portal.notifications import send_email_test_message, verify_email_delivery_configuration
 
 
 def main() -> None:
@@ -10,24 +10,24 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument(
-        "--smtp-test",
+        "--email-backend-check",
         action="store_true",
-        help="Verify SMTP connection/login and exit.",
+        help="Validate the configured email delivery backend and exit.",
     )
     parser.add_argument(
-        "--smtp-test-to",
-        help="Send a real SMTP test email to the given recipient and exit.",
+        "--email-test-to",
+        help="Send a real email through the configured delivery backend and exit.",
     )
     args = parser.parse_args()
 
     app = create_app()
-    if args.smtp_test or args.smtp_test_to:
-        if args.smtp_test_to:
-            send_smtp_test_email(app, args.smtp_test_to)
-            print(f"SMTP test email sent to {args.smtp_test_to}.")
+    if args.email_backend_check or args.email_test_to:
+        if args.email_test_to:
+            send_email_test_message(app, args.email_test_to)
+            print(f"Email test message sent to {args.email_test_to}.")
         else:
-            verify_smtp_connection(app)
-            print("SMTP connection and login succeeded.")
+            verify_email_delivery_configuration(app)
+            print("Email delivery backend configuration looks valid.")
         return
 
     app.run(host=args.host, port=args.port, debug=args.debug)

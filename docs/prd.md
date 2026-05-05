@@ -261,9 +261,9 @@ The product should separate the appreciation loop from the reward loop:
   delivery adapters mocked or stubbed.
 - Route or controller tests should focus on role permissions and major state
   transitions.
-- The existing repo has no meaningful prior-art test suite; the current
-  `test_email.py` script should not be treated as a real test pattern and
-  should be replaced with actual automated tests around notification behavior.
+- The existing repo has no meaningful prior-art notification test harness;
+  notification delivery should be covered with automated tests around the
+  adapter boundary instead of ad hoc manual scripts.
 
 ## Out of Scope
 
